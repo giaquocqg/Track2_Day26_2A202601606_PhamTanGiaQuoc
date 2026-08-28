@@ -39,7 +39,7 @@
 // coordinate this file computes is passed through r()/rr() before it
 // touches ctx.
 
-import { COLORS, SIZES, TIMINGS, sideHpColors, outcomeColor } from './theme.js';
+import { COLORS, SIZES, TIMINGS, GLOWS, PARTICLE_TYPES, sideHpColors, outcomeColor } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // tiny numeric / colour helpers
@@ -186,6 +186,119 @@ export function measurePixelText(ctx, str, scale) {
 }
 
 // ---------------------------------------------------------------------------
+// Glow text — draws text with a glowing halo effect for dramatic moments
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw pixel text with a glow/shadow effect behind it.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x - X position
+ * @param {number} y - Y position
+ * @param {string} str - Text to draw
+ * @param {string} color - Main text color
+ * @param {number} scale - Font scale
+ * @param {string} glowColor - Glow color (default: same as color)
+ * @param {number} glowBlur - Glow blur radius (default: 8)
+ */
+export function drawGlowText(ctx, x, y, str, color, scale, glowColor, glowBlur) {
+  const s = String(str == null ? '' : str);
+  const gc = glowColor || color;
+  const blur = num(glowBlur, 8);
+
+  // Draw glow layers (from outside in)
+  ctx.save();
+  ctx.shadowColor = gc;
+  ctx.shadowBlur = blur;
+  ctx.fillStyle = withAlpha(gc, 0.3);
+  drawPixelText(ctx, x, y, s, withAlpha(gc, 0.3), scale);
+  ctx.shadowBlur = blur * 0.5;
+  ctx.fillStyle = withAlpha(gc, 0.5);
+  drawPixelText(ctx, x, y, s, withAlpha(gc, 0.5), scale);
+  ctx.restore();
+
+  // Draw main text on top
+  drawPixelText(ctx, x, y, s, color, scale);
+}
+
+// ---------------------------------------------------------------------------
+// Typewriter text — reveals text character by character
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw text with a typewriter effect (reveals N characters based on progress).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x - X position
+ * @param {number} y - Y position
+ * @param {string} str - Full text to draw
+ * @param {number} progress - 0 to 1, how much to reveal
+ * @param {string} color - Text color
+ * @param {number} scale - Font scale
+ * @returns {number} - Width of the revealed portion
+ */
+export function drawTypewriterText(ctx, x, y, str, progress, color, scale) {
+  const s = String(str == null ? '' : str);
+  const visibleCount = Math.floor(s.length * clamp01(progress));
+  const visible = s.slice(0, visibleCount);
+
+  if (visible.length > 0) {
+    drawPixelText(ctx, x, y, visible, color, scale);
+  }
+
+  return measurePixelText(ctx, s.slice(0, visibleCount + 1), scale);
+}
+
+// ---------------------------------------------------------------------------
+// Pulsing text — text that pulses in size/alpha for attention
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw text that pulses (alpha oscillates between min and max).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x - X position
+ * @param {number} y - Y position
+ * @param {string} str - Text to draw
+ * @param {string} color - Text color
+ * @param {number} scale - Base font scale
+ * @param {number} t - Current time (for pulse calculation)
+ * @param {number} periodMs - Pulse period in ms (default: 500)
+ * @param {number} minAlpha - Minimum alpha (default: 0.5)
+ */
+export function drawPulsingText(ctx, x, y, str, color, scale, t, periodMs, minAlpha) {
+  const s = String(str == null ? '' : str);
+  const period = num(periodMs, 500);
+  const minA = num(minAlpha, 0.5);
+  const phase = (t % period) / period;
+  const alpha = minA + (1 - minA) * Math.abs(Math.sin(phase * Math.PI * 2));
+
+  drawPixelText(ctx, x, y, s, withAlpha(color, alpha), scale);
+}
+
+// ---------------------------------------------------------------------------
+// Bouncy text — text with a subtle bounce effect
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw text with a vertical bounce effect.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x - X position
+ * @param {number} y - Base Y position
+ * @param {string} str - Text to draw
+ * @param {string} color - Text color
+ * @param {number} scale - Font scale
+ * @param {number} progress - Animation progress 0 to 1
+ * @param {number} bounceHeight - Max bounce offset in pixels
+ */
+export function drawBouncyText(ctx, x, y, str, color, scale, progress, bounceHeight) {
+  const s = String(str == null ? '' : str);
+  const maxBounce = num(bounceHeight, 10);
+  // Bounce uses a sine curve that goes up then down
+  const bounceOffset = maxBounce * Math.sin(progress * Math.PI);
+  const adjustedY = y - bounceOffset;
+
+  drawPixelText(ctx, x, adjustedY, s, color, scale);
+}
+
+// ---------------------------------------------------------------------------
 // panel chrome — shared by combatLog / claimCutIn / scrubber / roundBanner
 // ---------------------------------------------------------------------------
 
@@ -264,6 +377,7 @@ export function hpBar(ctx, rect, state, t) {
   const displayed = lerp(from, to, eased);
   const losingHp = to < from;
   const flashing = losingHp && elapsed < TIMINGS.hpFlashMs;
+  const criticalHp = to <= 20 && to > 0; // Critical HP state (<=20%)
 
   const { fill, empty } = sideHpColors(s.side);
   const chunks = Math.max(1, SIZES.hpChunks);
@@ -277,6 +391,26 @@ export function hpBar(ctx, rect, state, t) {
   const bandHi = Math.ceil(Math.max(from, to) / chunkHp);
 
   ctx.save();
+
+  // Draw damage flash overlay for dramatic hits
+  if (flashing) {
+    const flashProgress = elapsed / TIMINGS.hpFlashMs;
+    const flashAlpha = 0.4 * (1 - flashProgress);
+    ctx.fillStyle = withAlpha(COLORS.damageRed, flashAlpha);
+    ctx.fillRect(R.x - 2, R.y - 2, R.w + 4, R.h + 4);
+  }
+
+  // Draw critical HP glow for low health
+  if (criticalHp && !flashing) {
+    const pulsePhase = (T % 1000) / 1000;
+    const pulseAlpha = 0.2 + 0.15 * Math.sin(pulsePhase * Math.PI * 2);
+    ctx.shadowColor = COLORS.damageRed;
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = withAlpha(COLORS.damageRed, pulseAlpha);
+    ctx.fillRect(R.x - 1, R.y - 1, R.w + 2, R.h + 2);
+    ctx.shadowBlur = 0;
+  }
+
   ctx.fillStyle = empty;
   ctx.fillRect(R.x, R.y, R.w, R.h);
 
@@ -287,7 +421,16 @@ export function hpBar(ctx, rect, state, t) {
     const fillAmount = clamp01(filledChunks - i);
     if (fillAmount <= 0) continue;
     const inBand = i >= bandLo && i < bandHi;
-    const color = (flashing && inBand) ? COLORS.damageRed : fill;
+    // Determine chunk color based on state
+    let color = fill;
+    if (flashing && inBand) {
+      // Flash red/orange during damage
+      color = COLORS.damageRed;
+    } else if (criticalHp) {
+      // Critical HP - pulse between red and normal
+      const pulsePhase = (T % 800) / 800;
+      color = lerpColor(fill, COLORS.damageRed, 0.3 + 0.2 * Math.sin(pulsePhase * Math.PI * 2));
+    }
     const w = Math.max(0, r(chunkW * fillAmount));
     if (w <= 0) continue;
     // On side A a partial chunk fills from its left edge, staying flush
@@ -300,7 +443,7 @@ export function hpBar(ctx, rect, state, t) {
     ctx.fillRect(fillX, R.y, w, R.h);
   }
 
-  ctx.strokeStyle = COLORS.panelBorder;
+  ctx.strokeStyle = flashing ? COLORS.damageRed : COLORS.panelBorder;
   ctx.lineWidth = SIZES.borderWidth;
   ctx.strokeRect(R.x + 1, R.y + 1, R.w - 2, R.h - 2);
   ctx.restore();
@@ -315,8 +458,23 @@ export function hpBar(ctx, rect, state, t) {
   ctx.save();
   ctx.fillStyle = withAlpha(COLORS.bg, 0.55);
   ctx.fillRect(tx - 1, ty - 1, tw + 2, 7 * scale + 2);
+  // Critical HP - draw with red glow
+  if (criticalHp && !flashing) {
+    ctx.shadowColor = COLORS.damageRed;
+    ctx.shadowBlur = 6;
+  }
   ctx.restore();
-  drawPixelText(ctx, tx, ty, label, COLORS.text, scale);
+  drawPixelText(ctx, tx, ty, label, criticalHp && !flashing ? COLORS.damageRed : COLORS.text, scale);
+}
+
+// Helper function to lerp between two hex colors
+function lerpColor(colorA, colorB, t) {
+  const a = hexToRgb(colorA);
+  const b = hexToRgb(colorB);
+  const r = Math.round(lerp(a.r, b.r, t));
+  const g = Math.round(lerp(a.g, b.g, t));
+  const bl = Math.round(lerp(a.b, b.b, t));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${bl.toString(16).padStart(2, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -767,7 +925,8 @@ export function screenShake(state, t) {
 // ---------------------------------------------------------------------------
 //
 // state shape:
-// { startedAt: number, x: number, y: number, color?: string, label?: string }
+// { startedAt: number, x: number, y: number, color?: string, label?: string,
+//   type?: string }  // type: 'default'|'damage'|'critical'|'heal'|'victory'
 // x/y are canvas-absolute coordinates (the point the mutation landed);
 // `rect` is only used as a fallback centre when x/y are omitted.
 
@@ -781,21 +940,57 @@ export function particleBurst(ctx, rect, state, t) {
   const R = rr(rect);
   const cx = r(num(s.x, R.x + R.w / 2));
   const cy = r(num(s.y, R.y + R.h / 2));
-  const color = s.color || COLORS.mutationSpark;
+
+  // Determine particle type configuration
+  const type = s.type || 'default';
+  const typeConfig = PARTICLE_TYPES[type] || PARTICLE_TYPES.damage;
+
+  // Get color from type config or override
+  let color = s.color || COLORS.mutationSpark;
+  if (typeConfig.color && !s.color) {
+    color = COLORS[typeConfig.color] || COLORS.mutationSpark;
+  }
+
   const progress = elapsed / TIMINGS.particleMs;
   const alpha = 1 - progress;
-  const maxRadius = 26;
-  const n = SIZES.particleCount;
+
+  // Particle configuration from type
+  const maxRadius = type === 'critical' ? 40 : type === 'victory' ? 50 : 26;
+  const n = typeConfig.particleCount || SIZES.particleCount;
+  const spreadRad = (typeConfig.spread / 180) * Math.PI;
+  const speedMult = typeConfig.speed || 1.0;
 
   ctx.save();
+
+  // Draw glow effect for critical/victory particles
+  if ((type === 'critical' || type === 'victory') && progress < 0.5) {
+    const glowAlpha = (1 - progress * 2) * 0.3;
+    const glowRadius = maxRadius * progress * 1.5;
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+    gradient.addColorStop(0, withAlpha(color, glowAlpha));
+    gradient.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.fillStyle = withAlpha(color, alpha);
   for (let i = 0; i < n; i++) {
-    const angle = (i / n) * Math.PI * 2 + i * 0.37;
-    const speed = 0.6 + 0.4 * Math.sin(i * 2.4);
+    // Spread angle determines the arc of particles
+    const angleOffset = (i / n) * spreadRad - spreadRad / 2 + Math.PI;
+    const angle = angleOffset + i * 0.37;
+    const speed = (0.6 + 0.4 * Math.sin(i * 2.4)) * speedMult;
     const radius = maxRadius * progress * speed;
     const px = r(cx + Math.cos(angle) * radius);
     const py = r(cy + Math.sin(angle) * radius);
-    ctx.fillRect(px, py, SIZES.particleSize, SIZES.particleSize);
+
+    // Larger particles for critical/victory
+    const size = type === 'critical' || type === 'victory'
+      ? SIZES.particleSize + 1
+      : SIZES.particleSize;
+
+    ctx.fillRect(px, py, size, size);
   }
   ctx.restore();
 
@@ -803,6 +998,17 @@ export function particleBurst(ctx, rect, state, t) {
     const scale = SIZES.fontScaleSmall;
     const text = String(s.label);
     const tw = measurePixelText(ctx, text, scale);
+
+    // Glow effect on label for dramatic particles
+    if (type === 'critical' || type === 'victory') {
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = withAlpha(color, alpha * 0.5);
+      drawPixelText(ctx, cx - Math.floor(tw / 2) + 1, cy - 10 - r(6 * progress) + 1, text, withAlpha(color, alpha * 0.5), scale);
+      ctx.restore();
+    }
+
     drawPixelText(ctx, cx - Math.floor(tw / 2), cy - 10 - r(6 * progress), text, withAlpha(color, alpha), scale);
   }
 }

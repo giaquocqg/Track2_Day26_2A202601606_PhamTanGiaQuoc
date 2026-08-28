@@ -133,6 +133,46 @@ export const FONT = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Glow effects — for dramatic highlights (K.O., critical hits, victory)
+// ---------------------------------------------------------------------------
+export const GLOWS = Object.freeze({
+  damageGlow: { color: '#ff3b3b', blur: 8, alpha: 0.6 },
+  criticalGlow: { color: '#ffd23f', blur: 12, alpha: 0.8 },
+  victoryGlow: { color: '#f4d35e', blur: 16, alpha: 0.9 },
+  denialGlow: { color: '#4d7cff', blur: 6, alpha: 0.5 },
+  integrityGlow: { color: '#ff2d55', blur: 10, alpha: 0.7 },
+});
+
+// ---------------------------------------------------------------------------
+// Particle effect types — defines behavior for different events
+// ---------------------------------------------------------------------------
+export const PARTICLE_TYPES = Object.freeze({
+  damage: { spread: 360, speed: 1.2, particleCount: 14, color: 'damageRed' },
+  critical: { spread: 720, speed: 2.0, particleCount: 20, color: 'creditFloat' },
+  heal: { spread: 180, speed: 0.8, particleCount: 8, color: 'sideAHp' },
+  miss: { spread: 90, speed: 0.3, particleCount: 6, color: 'unprovenGrey' },
+  denial: { spread: 270, speed: 0.6, particleCount: 10, color: 'denyBlue' },
+  victory: { spread: 360, speed: 1.5, particleCount: 24, color: 'creditFloat' },
+});
+
+// ---------------------------------------------------------------------------
+// Sound effect mappings (placeholder — sounds.js will implement actual audio)
+// ---------------------------------------------------------------------------
+export const SOUNDS = Object.freeze({
+  hit: 'slash',
+  miss: 'buzz',
+  damage: 'thud',
+  critical: 'alarm',
+  victory: 'fanfare',
+  defeat: 'crash',
+  roundStart: 'bell',
+  ko: 'explosion',
+  button: 'click',
+  deny: 'shield',
+  claim: 'chime',
+});
+
+// ---------------------------------------------------------------------------
 // Small lookups shared by every widget that is side- or outcome-aware.
 // ---------------------------------------------------------------------------
 export function sideColor(side) {

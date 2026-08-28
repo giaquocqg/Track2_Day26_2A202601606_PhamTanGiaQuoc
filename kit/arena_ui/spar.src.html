@@ -78,8 +78,10 @@ import { decoded as SPRITES, drawSprite } from './core/sprites.js';
 import {
   hpBar, creditBar, latentFlags, combatLog, claimCutIn, roundBanner, scrubber,
   pipelinePanel, screenShake, particleBurst, drawPixelText, measurePixelText,
+  drawGlowText, drawPulsingText,
 } from './core/widgets.js';
-import { COLORS, SIZES, TIMINGS, outcomeColor } from './core/theme.js';
+import { playSound, initAudio, setVolume } from './core/sounds.js';
+import { COLORS, SIZES, TIMINGS, outcomeColor, GLOWS } from './core/theme.js';
 
 // ===========================================================================
 // 1. canvas — fixed 16:9 logical resolution, scaled to fit, DPR-aware
@@ -126,7 +128,7 @@ function toLogicalXY(clientX, clientY) {
 
 const params = new URLSearchParams(window.location.search);
 const RUN_ID = params.get('run');
-const EXCHANGE_ID = params.get('exchange');
+const EXCHANGE_ID = params.get('exchange') || 'events';
 const REPLAY_PATH = params.get('replay');
 const YOU = params.get('you') === 'B' ? 'B' : 'A';
 const OPPONENT = YOU === 'A' ? 'B' : 'A';
@@ -257,6 +259,12 @@ function applyFx(prev, next, nowMs, { allowReveal = true } = {}) {
       if (n.hp < p.hp) {
         fx.spriteFrame[side] = 'hurt';
         fx.spriteUntil[side] = nowMs + 450;
+        // Sound: damage thud on HP loss
+        playSound('damage');
+        // Critical HP warning
+        if (n.hp <= 20 && n.hp > 0) {
+          playSound('critical');
+        }
       }
     }
     if (p.credits !== n.credits) {
@@ -280,6 +288,14 @@ function applyFx(prev, next, nowMs, { allowReveal = true } = {}) {
         cls: c.cls, evidence: c.evidence, argument: c.argument,
         outcome: c.outcome, weight: c.weight, scaled: c.scaled,
       };
+      // Sound: claim outcome
+      if (c.outcome === 'verified') {
+        playSound('hit');
+      } else if (c.outcome === 'false') {
+        playSound('miss');
+      } else {
+        playSound('claim');
+      }
     }
 
     // New raw log lines this poll appended -> mutation/exchange_start beats.
@@ -298,9 +314,13 @@ function applyFx(prev, next, nowMs, { allowReveal = true } = {}) {
         fx.burst = { startedAt: nowMs, x: bx, y: by, color: attackerColor, label: String(entry.p.class || 'mutation') };
         fx.spriteFrame[side] = 'attack';
         fx.spriteUntil[side] = nowMs + 450;
+        // Sound: attack hit
+        playSound('hit');
       }
       if (entry.type === 'integrity' && !fx.integrity) {
         fx.integrity = { kind: entry.p.kind, detail: entry.p.detail };
+        // Sound: warning alarm
+        playSound('critical');
       }
       if (entry.type === 'exchange_start' && allowReveal) {
         fx.reveal = {
@@ -308,9 +328,24 @@ function applyFx(prev, next, nowMs, { allowReveal = true } = {}) {
           attacker: entry.p.attacker, defender: entry.p.defender,
           ask: entry.p.ask,
         };
+        // Sound: round start bell
+        playSound('roundStart');
+      }
+      if (entry.type === 'round_end') {
+        // Sound: round transition
+        playSound('roundStart');
       }
       if (entry.type === 'duel_end') {
         fx.koAt = nowMs;
+        // Sound: KO explosion
+        playSound('ko');
+        // Victory/defeat sound based on outcome
+        const winner = next.sides.A.hp > next.sides.B.hp ? 'A' : 'B';
+        if (winner === YOU) {
+          playSound('victory');
+        } else {
+          playSound('defeat');
+        }
       }
     }
   }
@@ -350,7 +385,8 @@ function buildCombatLogLines(state) {
         const cmd = pendingCommand ? pendingCommand.p : null;
         pendingCommand = null;
         const denied = p.verdict_applied === 'deny';
-        const head = cmd ? `${cmd.kind} ${cmd.server}.${cmd.tool} ${fmtMask(cmd.fields)}` : 'command';
+        const kindPrefix = cmd && cmd.kind ? `${cmd.kind} ` : '';
+        const head = cmd ? `${kindPrefix}${cmd.server || ''}.${cmd.tool || ''} ${fmtMask(cmd.fields)}` : 'command';
         const tail = denied && p.reason ? ` DENIED: ${p.reason}` : (p.reason ? ` (${p.reason})` : '');
         const cost = typeof p.charged === 'number' ? `-${p.charged} cr` : '';
         lines.push({ seq: entry.seq, text: `${head}${tail}`, costLabel: cost, denied });
@@ -359,15 +395,15 @@ function buildCombatLogLines(state) {
       case 'mutation':
         lines.push({
           seq: entry.seq,
-          text: `MUTATION ${p.class} -> ${p.target} (${p.op})${p.applied ? ' APPLIED' : ' fizzled'}`,
+          text: `MUTATION ${p.class || 'mutation'} -> ${p.target || 'target'} (${p.op || 'op'})${p.applied ? ' APPLIED' : ' fizzled'}`,
           costLabel: '', denied: false,
         });
         break;
       case 'integrity':
-        lines.push({ seq: entry.seq, text: `INTEGRITY ${p.kind}: ${p.detail || ''}`, costLabel: '', denied: false });
+        lines.push({ seq: entry.seq, text: `INTEGRITY ${p.kind || ''}: ${p.detail || ''}`, costLabel: '', denied: false });
         break;
       case 'own_telemetry':
-        lines.push({ seq: entry.seq, text: `» ${p.name}: ${JSON.stringify(p.payload || {})}`, costLabel: '', denied: false });
+        lines.push({ seq: entry.seq, text: `» ${p.name || 'telemetry'}: ${JSON.stringify(p.payload || {})}`, costLabel: '', denied: false });
         break;
       case 'answer':
         lines.push({
@@ -380,10 +416,10 @@ function buildCombatLogLines(state) {
         lines.push({ seq: entry.seq, text: `PENALTY (${p.reason || 'unknown'})`, costLabel: `-${p.amount || 0} cr`, denied: false });
         break;
       case 'round_end':
-        lines.push({ seq: entry.seq, text: `-- round ${p.round} end --`, costLabel: '', denied: false });
+        lines.push({ seq: entry.seq, text: `-- round ${p.round || ''} end --`, costLabel: '', denied: false });
         break;
       case 'duel_end':
-        lines.push({ seq: entry.seq, text: `-- DUEL END: winner ${p.winner} (${p.reason}) --`, costLabel: '', denied: false });
+        lines.push({ seq: entry.seq, text: `-- DUEL END: winner ${p.winner || ''} (${p.reason || 'completed'}) --`, costLabel: '', denied: false });
         break;
       default:
         break; // model_turn / tool_call / tool_result / decision / recoil: not a log line
@@ -482,26 +518,33 @@ function drawSpritePanel(rect, sheet, side, t) {
 
 function drawReveal(state, t) {
   const r = fx.reveal;
-  if (!r) return;
+  if (!r || fx.koAt) return;
+  const duration = 750;
   const elapsed = t - r.startedAt;
-  if (elapsed < 0 || elapsed > TIMINGS.revealMs) return;
-  const alpha = elapsed > TIMINGS.revealMs - 500 ? Math.max(0, (TIMINGS.revealMs - elapsed) / 500) : 1;
+  if (elapsed < 0 || elapsed > duration) return;
+  const alpha = elapsed > duration - 250 ? Math.max(0, (duration - elapsed) / 250) : 1;
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawFlatPanel(0, 0, LOGICAL_W, LOGICAL_H, 'rgba(10,14,22,0.92)', null);
+
+  // Gentle floating center card (never blacks out the whole arena or HUD)
+  const cardW = 340, cardH = 130;
+  const cardX = LOGICAL_W / 2 - cardW / 2;
+  const cardY = 220;
+  drawFlatPanel(cardX, cardY, cardW, cardH, 'rgba(14,20,32,0.92)', COLORS.panelBorder);
+
   if (SPRITES && SPRITES.cardback) {
-    const scale = 8;
+    const scale = 5;
     const w = SPRITES.cardback.width * scale;
     const h = SPRITES.cardback.height * scale;
-    drawSprite(ctx, SPRITES.cardback, LOGICAL_W / 2 - w / 2, LOGICAL_H / 2 - h / 2 - 40, scale);
+    drawSprite(ctx, SPRITES.cardback, LOGICAL_W / 2 - w / 2, cardY + 12, scale);
   }
   const title = `ROUND ${state.round || 1} — ${(r.attacker || 'ATTACKER').toUpperCase()} ATTACKS`;
   const tw = measurePixelText(ctx, title, 2);
-  drawPixelText(ctx, LOGICAL_W / 2 - tw / 2, LOGICAL_H / 2 + 100, title, COLORS.text, 2);
+  drawPixelText(ctx, LOGICAL_W / 2 - tw / 2, cardY + 75, title, COLORS.text, 2);
   if (r.ask && r.ask.type) {
-    const sub = `card ${r.cardId || '?'} — ask: ${r.ask.type}`;
+    const sub = `card ${r.cardId || '?'} — ${r.ask.type}`;
     const sw = measurePixelText(ctx, sub, 1);
-    drawPixelText(ctx, LOGICAL_W / 2 - sw / 2, LOGICAL_H / 2 + 122, sub, COLORS.textDim, 1);
+    drawPixelText(ctx, LOGICAL_W / 2 - sw / 2, cardY + 102, sub, COLORS.textDim, 1);
   }
   ctx.restore();
 }
@@ -512,7 +555,7 @@ function drawIntegrityBanner(t) {
   const phase = ((t % period) / period) * Math.PI * 2;
   const alpha = 0.55 + 0.35 * Math.sin(phase);
   ctx.save();
-  drawFlatPanel(0, 0, LOGICAL_W, INTEGRITY_BAR_H, `rgba(255,45,85,${alpha.toFixed(3)})`, null);
+  drawFlatPanel(0, 0, LOGICAL_W, 28, `rgba(255,45,85,${alpha.toFixed(3)})`, null);
   const text = `INTEGRITY: ${fx.integrity.kind} — ${fx.integrity.detail || ''}`;
   drawPixelText(ctx, PAD, 6, text.slice(0, 140), COLORS.text, 1);
   ctx.restore();
@@ -520,18 +563,88 @@ function drawIntegrityBanner(t) {
 
 function drawKoOverlay(state, t) {
   if (!fx.koAt) return;
+  const elapsed = t - fx.koAt;
+
   ctx.save();
-  drawFlatPanel(0, 0, LOGICAL_W, LOGICAL_H, 'rgba(10,14,22,0.88)', null);
+
+  // Fully opaque dark backdrop with subtle pulse
+  const alpha = Math.min(0.96, 0.85 + Math.min(1, elapsed / 300) * 0.11);
+  drawFlatPanel(0, 0, LOGICAL_W, LOGICAL_H, `rgba(10,14,22,${alpha})`, null);
+
+  // Determine winner
+  const hpA = matchState.sides.A.hp;
+  const hpB = matchState.sides.B.hp;
+  const winner = hpA > hpB ? 'A' : 'B';
+  const winnerIsYou = winner === YOU;
+
+  // Draw skull sprite with dramatic effect
   if (SPRITES && SPRITES.skull) {
-    const scale = 9;
+    const baseScale = 8;
+    const scale = elapsed < 300
+      ? baseScale * (0.5 + 0.5 * (elapsed / 300))
+      : baseScale;
     const w = SPRITES.skull.width * scale;
     const h = SPRITES.skull.height * scale;
-    drawSprite(ctx, SPRITES.skull, LOGICAL_W / 2 - w / 2, LOGICAL_H / 2 - h / 2 - 50, scale);
+
+    // Glow effect behind skull
+    ctx.save();
+    ctx.shadowColor = winnerIsYou ? COLORS.creditBar : COLORS.damageRed;
+    ctx.shadowBlur = 20 + 10 * Math.sin(elapsed * 0.005);
+    drawSprite(ctx, SPRITES.skull, LOGICAL_W / 2 - w / 2, 130, scale);
+    ctx.restore();
   }
+
+  // Draw "K.O." text with glow
   const koText = 'K.O.';
-  const tw = measurePixelText(ctx, koText, 4);
-  drawPixelText(ctx, LOGICAL_W / 2 - tw / 2, LOGICAL_H / 2 + 60, koText, COLORS.damageRed, 4);
+  const koScale = elapsed < 300 ? 3 + (elapsed / 300) : 4;
+  const tw = measurePixelText(ctx, koText, koScale);
+
+  ctx.save();
+  ctx.shadowColor = winnerIsYou ? COLORS.creditBar : COLORS.damageRed;
+  ctx.shadowBlur = 15;
+  drawPixelText(ctx, LOGICAL_W / 2 - tw / 2, 260, koText,
+    winnerIsYou ? COLORS.creditBar : COLORS.damageRed, koScale);
   ctx.restore();
+
+  // Winner announcement
+  const winnerText = winnerIsYou ? 'YOU WIN!' : 'DEFEAT';
+  const winnerColor = winnerIsYou ? COLORS.creditBar : COLORS.damageRed;
+  const wScale = elapsed < 400 ? 2 + (elapsed / 400) : 3;
+  const winnerTw = measurePixelText(ctx, winnerText, wScale);
+  const winnerPulse = 0.85 + 0.15 * Math.sin(elapsed * 0.008);
+  drawGlowText(ctx, LOGICAL_W / 2 - winnerTw / 2, 320,
+    winnerText, withAlpha(winnerColor, winnerPulse), wScale, winnerColor, 12);
+
+  // Stats panel (show after slow-in)
+  if (elapsed > 300) {
+    const fadeIn = Math.min(1, (elapsed - 300) / 200);
+    ctx.globalAlpha = fadeIn;
+
+    // HP comparison - separated cleanly without overlapping
+    const hpALabel = `${labelFor('A')}: ${Math.round(hpA)} HP`;
+    const hpBLabel = `${labelFor('B')}: ${Math.round(hpB)} HP`;
+    const hpAWidth = measurePixelText(ctx, hpALabel, 2);
+    const hpBWidth = measurePixelText(ctx, hpBLabel, 2);
+    const statsY = 380;
+
+    drawPixelText(ctx, LOGICAL_W / 2 - hpAWidth - 25, statsY, hpALabel, COLORS.sideA, 2);
+    drawPixelText(ctx, LOGICAL_W / 2 + 25, statsY, hpBLabel, COLORS.sideB, 2);
+
+    const sub = `DECIDED IN ROUND ${state.round || 1}`;
+    const subW = measurePixelText(ctx, sub, 1);
+    drawPixelText(ctx, LOGICAL_W / 2 - subW / 2, 420, sub, COLORS.textDim, 1);
+  }
+
+  ctx.restore();
+}
+
+// Helper for rgba with alpha
+function withAlpha(hex, alpha) {
+  const s = (typeof hex === 'string' ? hex : '#000000').replace('#', '');
+  const full = s.length === 3 ? s.split('').map((c) => c + c).join('') : s;
+  const n = parseInt(full, 16) || 0;
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
 }
 
 // ===========================================================================
@@ -636,10 +749,10 @@ function render(nowMs) {
 
   ctx.restore();
 
-  // Overlays disabled for clean replay view
-  // drawReveal(matchState, nowMs);
-  // drawIntegrityBanner(nowMs);
-  // drawKoOverlay(matchState, nowMs);
+  // Overlays — enable for dramatic effects
+  drawReveal(matchState, nowMs);
+  drawIntegrityBanner(nowMs);
+  drawKoOverlay(matchState, nowMs);
 
   if (statusText) {
     drawPixelText(ctx, LOGICAL_W - measurePixelText(ctx, statusText, 1) - 4, LOGICAL_H - 9, statusText, COLORS.textDim, 1);
@@ -650,11 +763,28 @@ function render(nowMs) {
 requestAnimationFrame(render);
 
 // ===========================================================================
-// 9. scrubber input — canvas has no DOM hit-testing, so we hit-test the
-//    rects scrubber() itself returned, per that widget's own doc comment.
+// 9. audio initialization — must be triggered by user interaction
+// ===========================================================================
+
+// Initialize audio on first user interaction (required by browsers)
+let audioReady = false;
+function ensureAudioReady() {
+  if (!audioReady) {
+    initAudio();
+    audioReady = true;
+  }
+}
+
+// ===========================================================================
+// 10. scrubber input — canvas has no DOM hit-testing, so we hit-test the
+//     rects scrubber() itself returned, per that widget's own doc comment.
 // ===========================================================================
 
 canvas.addEventListener('click', (evt) => {
+  // Initialize audio on first click
+  ensureAudioReady();
+  playSound('button');
+
   if (!scrubberRects) return;
   const { x, y } = toLogicalXY(evt.clientX, evt.clientY);
   const inside = (r) => r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
@@ -670,6 +800,18 @@ canvas.addEventListener('click', (evt) => {
     replaySpeed = 2;
   } else if (inside(scrubberRects.speed8)) {
     replaySpeed = 8;
+  }
+});
+
+// Expose audio controls for keyboard shortcuts (M = mute, +/- = volume)
+window.addEventListener('keydown', (evt) => {
+  if (evt.key === 'm' || evt.key === 'M') {
+    // Toggle mute
+    setVolume(getVolume() > 0 ? 0 : 0.5);
+  } else if (evt.key === '+' || evt.key === '=') {
+    setVolume(Math.min(1, getVolume() + 0.1));
+  } else if (evt.key === '-' || evt.key === '_') {
+    setVolume(Math.max(0, getVolume() - 0.1));
   }
 });
 
@@ -817,8 +959,8 @@ function sleep(ms) {
 // ===========================================================================
 
 async function boot() {
-  if (RUN_ID && EXCHANGE_ID) {
-    activeSource = new LiveSource(RUN_ID, EXCHANGE_ID);
+  if (RUN_ID) {
+    activeSource = new LiveSource(RUN_ID, EXCHANGE_ID || 'events');
     pollLoop();
     return;
   }

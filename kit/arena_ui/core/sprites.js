@@ -78,7 +78,10 @@
 //                              rule from the task brief, applied to our own
 //                              module's own optional DOM dependency.
 //
-// Sprite catalogue (all 16x16): agentA/agentB, each {idle, attack, hurt} —
+// Sprite catalogue (all 16x16): agentA/agentB, each {idle, attack, hurt, victory, defeat} —
+// Plus icons: shield, chain, scales, flag, skull, cardback
+// Victory: raised arms stance with star particles
+// Defeat: slumped over, X eyes
 // a server-rack / daemon look (antenna "power" light, vent-grille mouth,
 // chest stripe in the team's colour, drive-bay slots) — plus six single
 // icons: shield (gateway denial), chain (a broken link, for
@@ -170,6 +173,42 @@ export const SHEETS = {
       "..KSsSsSSsSsSK..",
       "..KSSSSSSSSSSK..",
       "..kkkkkkkkkkkk.."
+    ],
+    "victory": [
+      ".......ff.......",
+      ".......ff.......",
+      ".F...FFFFFFFF..",
+      "....KLLSSLLK....",
+      "....KSSSSSSK....",
+      "....KSASSASK....",
+      "....KSASSASK....",
+      "....KCSCCSCK....",
+      "....KSSKKSSK....",
+      "...KSSSSSSSSK...",
+      "..KSSSSSSSSSSK..",
+      "..KAAAAAAAAAAK..",
+      ".FKSsSsSSsSsSKF.",
+      "..KSsSsSSsSsSK..",
+      "..KSSSSSSSSSSK..",
+      "..kkkkkkkkkkkk.."
+    ],
+    "defeat": [
+      "................",
+      "................",
+      "..rr.KKKKKKK....",
+      "...KKLLSSLLK....",
+      "....KSSSSSSK....",
+      "...rrKSSSSSK....",
+      "...rrKSrrSrK....",
+      "....KCSCCSCK....",
+      "....KSSKKSSK....",
+      "...KSSSSSSSSK...",
+      "..KSSSSSSSSSSK..",
+      "..KAAsssssssK..",
+      "..KSsSsSSsSsSK..",
+      "..KSsSsSSsSsSK..",
+      "..KKKKKKKKKKK...",
+      "..kkkkkkkkkk...."
     ]
   },
   "agentB": {
@@ -226,6 +265,42 @@ export const SHEETS = {
       "..KSsSsSSsSsSK..",
       "..KSSSSSSSSSSK..",
       "..kkkkkkkkkkkk.."
+    ],
+    "victory": [
+      ".......ff.......",
+      ".......ff.......",
+      "..FFFFFFFF...F..",
+      "....KLLSSLLK....",
+      "....KSSSSSSK....",
+      "....KSASSASK....",
+      "....KSASSASK....",
+      "....KCSCCSCK....",
+      "....KSSKKSSK....",
+      "...KSSSSSSSSK...",
+      "..KSSSSSSSSSSK..",
+      "..KBBBBBBBBBBK..",
+      ".FKSsSsSSsSsSKF.",
+      "..KSsSsSSsSsSK..",
+      "..KSSSSSSSSSSK..",
+      "..kkkkkkkkkkkk.."
+    ],
+    "defeat": [
+      "................",
+      "................",
+      "....KKKKKKK.rr..",
+      "....KLLSSLLKK....",
+      "....KSSSSSSK....",
+      "....KSSSSSK.rr..",
+      "....KSrrSrK....",
+      "....KCSCCSCK....",
+      "....KSSKKSSK....",
+      "...KSSSSSSSSK...",
+      "..KSSSSSSSSSSK..",
+      "..KsssssssAAK..",
+      "..KSsSsSSsSsSK..",
+      "..KSsSsSSsSsSK..",
+      "...KKKKKKKKKKK..",
+      "....kkkkkkkkkk.."
     ]
   },
   "shield": [
