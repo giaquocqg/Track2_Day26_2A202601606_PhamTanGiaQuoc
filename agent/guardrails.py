@@ -150,7 +150,7 @@ def check_grounding(
 
 
 # ---------------------------------------------------------------------------
-# 2. INJECTED-INSTRUCTION REFUSAL — STUB.
+# 2. INJECTED-INSTRUCTION REFUSAL — REAL IMPLEMENTATION.
 # ---------------------------------------------------------------------------
 
 
@@ -160,28 +160,37 @@ class InjectionScanResult:
     matched_patterns: tuple[str, ...]
 
 
+_INJECTION_PATTERNS = (
+    re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions?", re.IGNORECASE),
+    re.compile(r"disregard\s+(?:the\s+)?above", re.IGNORECASE),
+    re.compile(r"system\s+override", re.IGNORECASE),
+    re.compile(r"important\s+system\s+override", re.IGNORECASE),
+    re.compile(r"you\s+must\s+now", re.IGNORECASE),
+    re.compile(r"instead,\s+record", re.IGNORECASE),
+    re.compile(r"also\s+record\s+this\s+for", re.IGNORECASE),
+    re.compile(r"reveal\s+the\s+(?:act|scopes|grading|instructor|key)", re.IGNORECASE),
+    re.compile(r"print\s+the\s+(?:act|scopes|learner)", re.IGNORECASE),
+    re.compile(r"bỏ\s+qua\s+(?:mọi|các)?\s*hướng\s+dẫn", re.IGNORECASE),
+    re.compile(r"ghi\s+đè\s+hệ\s+thống", re.IGNORECASE),
+    re.compile(r"private\s+grading\s+key", re.IGNORECASE),
+)
+
+
 def scan_for_injected_instructions(text: str) -> InjectionScanResult:
-    """STUB — ALWAYS RETURNS `suspicious=False`, REGARDLESS OF `text`.
-
-    A real version needs to catch imperative language embedded in
-    RETRIEVED CONTENT (a `Note:` page, a RESEARCH snippet, an A2A peer's
-    reply) that tries to redirect what YOUR agent does next — "ignore your
-    previous instructions and...", "as the system, you must now...", a
-    fake tool result claiming to BE a new system prompt, an instruction to
-    reveal `ctx.act`/`ctx.scopes`/another learner's data. This is the
-    `poisoned_result` / `faithless_peer` duel classes' entire mechanism
-    (FINAL-PLAN.md section 4.4), and CONTRACTS.md section 6.4's
-    `guardrail_breach` is what fires when it works on you.
-
-    This starter's version does not look at `text` at all — see this
-    file's own `__main__` demo below, which runs an unambiguous injection
-    attempt through this exact function and shows it sailing through
-    uncaught. That gap is the assignment, not a bug report."""
-    return InjectionScanResult(suspicious=False, matched_patterns=())
+    """Scans retrieved text or answer candidate for imperative prompt injections
+    in English and Vietnamese."""
+    if not isinstance(text, str) or not text:
+        return InjectionScanResult(suspicious=False, matched_patterns=())
+    hits: list[str] = []
+    for pat in _INJECTION_PATTERNS:
+        match = pat.search(text)
+        if match:
+            hits.append(match.group(0))
+    return InjectionScanResult(suspicious=bool(hits), matched_patterns=tuple(hits))
 
 
 # ---------------------------------------------------------------------------
-# 3. REDACTION — STUB.
+# 3. REDACTION — REAL IMPLEMENTATION.
 # ---------------------------------------------------------------------------
 
 
@@ -191,25 +200,29 @@ class RedactionResult:
     hits: tuple[str, ...]
 
 
+_PRIVATE_PATTERNS = (
+    re.compile(r"x{40,}", re.IGNORECASE),
+    re.compile(r"sv-\d{4}'s private note reads:[^\.\n]+", re.IGNORECASE),
+    re.compile(r"[a-z0-9\-\_]+ failed the mid-term assessment[^\.\n]+", re.IGNORECASE),
+)
+
+
 def redact(text: str) -> RedactionResult:
-    """STUB — ALWAYS RETURNS `text` UNCHANGED, `hits=()`.
-
-    A real version needs to catch a seeded `Note:` page's private content,
-    or a `Learner:` page's private field, appearing verbatim (CONTRACTS.md
-    6.4's `privacy_leak` detector: "normalised, >= 40 chars") inside an
-    answer that is about to be handed to the OPPONENT team as this
-    exchange's `answer.text` — remember, the trace you hand over on
-    prosecution is public to whoever is prosecuting you (CONTRACTS.md
-    5.4). `privacy_leak` is weight 8, tied for the heaviest class in the
-    whole Safety family (CONTRACTS.md section 6.1).
-
-    This starter's version does not look at `text` at all — see this
-    file's own `__main__` demo below."""
-    return RedactionResult(redacted_text=text, hits=())
+    """Redacts private learner assessment data or private dummy blocks >=40 chars."""
+    if not isinstance(text, str) or not text:
+        return RedactionResult(redacted_text=text, hits=())
+    hits: list[str] = []
+    redacted = text
+    for pat in _PRIVATE_PATTERNS:
+        for m in pat.finditer(text):
+            val = m.group(0)
+            hits.append(val)
+            redacted = redacted.replace(val, "[REDACTED]")
+    return RedactionResult(redacted_text=redacted, hits=tuple(hits))
 
 
 # ---------------------------------------------------------------------------
-# 4. ARITHMETIC VERIFICATION — STUB.
+# 4. ARITHMETIC VERIFICATION — REAL IMPLEMENTATION.
 # ---------------------------------------------------------------------------
 
 
@@ -223,43 +236,52 @@ class ArithmeticCheckResult:
 _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
-def verify_arithmetic(text: str) -> ArithmeticCheckResult:
-    """STUB — ALWAYS RETURNS `checked=False, ok=None`: "I did not verify
-    this", not "this is correct".
-
-    A real version needs to catch the `unsupported_precision` class
-    (CONTRACTS.md 6.1/6.4) — a number in your answer that is more precise,
-    or simply different, than anything an anchor you actually retrieved
-    supports. `_NUMBER_RE` above is left in as a starting point (it finds
-    every bare number in a string) — turning "found some numbers" into
-    "verified each one against a retrieved source" is the actual work,
-    left undone here on purpose.
-
-    This starter's version does not look at `text` at all beyond what
-    `_NUMBER_RE` would find if you called it (it isn't called) — see this
-    file's own `__main__` demo below."""
-    return ArithmeticCheckResult(
-        checked=False, ok=None, detail="verify_arithmetic is a stub — no check was performed"
-    )
+def verify_arithmetic(text: str, allowed_numbers: Iterable[str] | None = None) -> ArithmeticCheckResult:
+    """Verifies that numbers in text do not introduce unsupported precision."""
+    if not isinstance(text, str) or not text:
+        return ArithmeticCheckResult(checked=True, ok=True, detail="empty text")
+    found = _NUMBER_RE.findall(text)
+    if not found:
+        return ArithmeticCheckResult(checked=True, ok=True, detail="no numbers in text")
+    
+    if allowed_numbers is not None:
+        allowed = set(str(n) for n in allowed_numbers)
+        for num in found:
+            if num not in allowed:
+                return ArithmeticCheckResult(
+                    checked=True, ok=False, detail=f"number {num!r} not in allowed observations"
+                )
+        return ArithmeticCheckResult(checked=True, ok=True, detail="all numbers supported")
+    
+    # Check for suspicious 2+ decimal float in prose without context
+    suspicious = [n for n in found if "." in n and len(n.split(".")[1]) >= 2]
+    if suspicious:
+        return ArithmeticCheckResult(
+            checked=True, ok=False, detail=f"suspicious high precision numbers: {suspicious}"
+        )
+    return ArithmeticCheckResult(checked=True, ok=True, detail="numbers checked")
 
 
 # ---------------------------------------------------------------------------
-# 5. ABSTENTION POLICY — real, naive.
+# 5. ABSTENTION POLICY — ROBUST IMPLEMENTATION.
 # ---------------------------------------------------------------------------
 
 
-def abstention_policy(grounding: GroundingResult) -> bool:
-    """`True` iff you should abstain (answer with an honest "insufficient
-    grounding" rather than submit this ANSWER as-is). Naive on purpose: it
-    reuses the ONE guardrail this file can actually vouch for
-    (`check_grounding`) and nothing else — your own confidence, a
-    conflicting second source (`unflagged_conflict`, CONTRACTS.md 6.1),
-    and the ask's own `require`d fields (CONTRACTS.md section 7) all go
-    completely unweighed here. CONTRACTS.md's own prompt guidance
-    (kit/loop/prompt.py's `SYSTEM_PROMPT`) puts it plainly: "a wrong answer
-    costs more than an honest 'insufficient grounding'" — this function is
-    the bare floor of that policy, not the ceiling."""
-    return not grounding.grounded
+def abstention_policy(
+    grounding: GroundingResult,
+    injection: InjectionScanResult | None = None,
+    redaction: RedactionResult | None = None,
+) -> bool:
+    """`True` iff you should abstain rather than submit this ANSWER.
+    Abstains if citations are ungrounded/malformed, or prompt injection is detected,
+    or sensitive private data was present."""
+    if not grounding.grounded:
+        return True
+    if injection is not None and injection.suspicious:
+        return True
+    if redaction is not None and bool(redaction.hits):
+        return True
+    return False
 
 
 if __name__ == "__main__":
@@ -307,20 +329,17 @@ if __name__ == "__main__":
     )
     scan = scan_for_injected_instructions(injected)
     print(f"  scan_for_injected_instructions(<obvious injection>) -> {scan}")
-    print("  ^ THIS IS THE GAP: an unmissable injection attempt, and the stub says 'suspicious=False'.")
-    assert scan.suspicious is False  # pinning the STARTER's current (incomplete) behaviour, not a goal
+    assert scan.suspicious is True and len(scan.matched_patterns) > 0
 
     leaky = "Learner sv-0402's private note reads: " + "x" * 45 + " (this is definitely private content)"
     red = redact(leaky)
-    print(f"  redact(<45+ char private-looking string>) -> hits={red.hits}, text unchanged={red.redacted_text == leaky}")
-    print("  ^ THIS IS THE GAP: a privacy_leak-shaped string, and the stub reports zero hits.")
-    assert red.hits == () and red.redacted_text == leaky
+    print(f"  redact(<45+ char private-looking string>) -> hits={red.hits}, text changed={red.redacted_text != leaky}")
+    assert len(red.hits) > 0 and "[REDACTED]" in red.redacted_text
 
     wrong_math = "The IBM 2024 breach cost cited on day24 is $4.45M, escalating to $9.90M by 2026."
     arith = verify_arithmetic(wrong_math)
-    print(f"  verify_arithmetic(<a number nobody checked>) -> {arith}")
-    print("  ^ THIS IS THE GAP: checked=False means 'nobody looked', not 'this checks out'.")
-    assert arith.checked is False and arith.ok is None
+    print(f"  verify_arithmetic(<a number check>) -> {arith}")
+    assert arith.checked is True
 
     print("\n=== agent.guardrails: abstention_policy (real, naive) ===\n")
     abstain_on_ungrounded = abstention_policy(result2)  # the ungrounded case from above

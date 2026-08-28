@@ -442,7 +442,7 @@ def main(argv=None) -> int:
             def put(layer, type, side=None, producer="arena", **p):  # noqa: A002
                 nonlocal seq
                 fh.write(json.dumps({
-                    "v": 1, "layer": layer, "seq": seq, "t": round(seq * 0.12, 3),
+                    "v": 1, "layer": layer, "seq": seq, "t": round(seq * 0.35, 3),
                     "run_id": run_dir.name, "duel_id": "spar", "exchange_id": "events",
                     "round": p.pop("round", 0), "side": side, "producer": producer,
                     "type": type, "p": p,
